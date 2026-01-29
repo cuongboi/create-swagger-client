@@ -48,26 +48,26 @@ async function generate() {
   sourceFile.addTypeAlias({
     name: "ExtractPathParams",
     isExported: true,
-    typeParameters: ["T extends KeyPaths", "K extends RestMethod"],
-    type: "paths[T][K] extends { parameters: { path?: infer P } } ? P : never",
+    typeParameters: ["K extends KeyPaths", "M extends RestMethod"],
+    type: "paths[K][M] extends { parameters: { path?: infer P } } ? P : never",
   });
   sourceFile.addTypeAlias({
     name: "ExtractQueryParams",
     isExported: true,
-    typeParameters: ["T extends KeyPaths", "K extends RestMethod"],
-    type: "paths[T][K] extends { parameters: { query?: infer Q } } ? Q : never",
+    typeParameters: ["K extends KeyPaths", "M extends RestMethod"],
+    type: "paths[K][M] extends { parameters: { query?: infer Q } } ? Q : never",
   });
   sourceFile.addTypeAlias({
     name: "ExtractHeaderParams",
     isExported: true,
-    typeParameters: ["T extends KeyPaths", "K extends RestMethod"],
-    type: "paths[T][K] extends { parameters: { header?: infer H } } ? H : never",
+    typeParameters: ["K extends KeyPaths", "M extends RestMethod"],
+    type: "paths[K][M] extends { parameters: { header?: infer H } } ? H : never",
   });
   sourceFile.addTypeAlias({
     name: "ExtractBody",
     isExported: true,
-    typeParameters: ["T extends KeyPaths", "K extends RestMethod"],
-    type: `paths[T][K] extends {
+    typeParameters: ["K extends KeyPaths", "M extends RestMethod"],
+    type: `paths[K][M] extends {
   requestBody: { content: { "application/json": infer B } };
 }
   ? B
@@ -76,14 +76,20 @@ async function generate() {
   sourceFile.addTypeAlias({
     name: "APIResponse",
     isExported: true,
-    typeParameters: ["T extends KeyPaths", "K extends RestMethod"],
-    type: `paths[T][K] extends {
-  responses:
-    | { content: { "application/json": infer R } }
-    | { [code: number]: { content: { "application/json": infer R } } };
-}
-  ? R
-  : unknown`,
+    typeParameters: ["K extends KeyPaths", "M extends RestMethod"],
+    type: `paths[K][M] extends { responses: infer R }
+  ? R extends {
+      content: { "application/json": infer C };
+    }
+    ? C
+    : R extends {
+          [status: number]: infer S;
+        }
+      ? S extends { content: { "application/json": infer C } }
+        ? C
+        : never
+      : never
+  : never;`,
   });
   sourceFile.addTypeAlias({
     name: "ApiPayload",
