@@ -78,45 +78,31 @@ async function generate() {
     isExported: true,
     typeParameters: ["K extends KeyPaths", "M extends RestMethod"],
     type: `paths[K][M] extends { responses: infer R }
-  ? R extends {
-      content: { "application/json": infer C };
-    }
+  ? R extends { "200"?: { content: { "application/json": infer C } } }
     ? C
-    : R extends {
-          [status: number]: infer S;
-        }
-      ? S extends { content: { "application/json": infer C } }
-        ? C
-        : never
-      : never
-  : never;`,
+    : R extends { content: { "application/json": infer C } }
+    ? C
+    : R extends Record<number | string, { content: { "application/json": infer C } }>
+    ? C
+    : never
+  : never`,
   });
   sourceFile.addTypeAlias({
     name: "ApiPayload",
     isExported: true,
-    typeParameters: ["T extends KeyPaths", "K extends RestMethod"],
+    typeParameters: ["T extends KeyPaths", "M extends RestMethod"],
     type: `{
-  path?: ExtractPathParams<T, K>;
-  query?: ExtractQueryParams<T, K>;
-  body?: K extends "post" | "put" | "patch" ? ExtractBody<T, K> : never;
-  headers?: ExtractHeaderParams<T, K>;
+  path?: ExtractPathParams<T, M>;
+  query?: ExtractQueryParams<T, M>;
+  body?: M extends "post" | "put" | "patch" ? ExtractBody<T, M> : never;
+  headers?: ExtractHeaderParams<T, M> & Record<string, string>;
 }`,
   });
   sourceFile.addTypeAlias({
-    name: "ApiClientType",
-    isExported: true,
+    name: "PathsForMethod",
+    typeParameters: ["M extends RestMethod"],
     type: `{
-  [K in RestMethod]: <T extends KeyPaths>(
-    path: T,
-    payload?: ApiPayload<T, K>,
-  ) => Promise<APIResponse<T, K>>;
-}`,
-  });
-  sourceFile.addTypeAlias({
-    name: "TypePaths",
-    typeParameters: ["T extends RestMethod"],
-    type: `{
-  [K in KeyPaths]: paths[K] extends { [M in T]: unknown } ? K : never;
+  [K in KeyPaths]: paths[K] extends Record<M, unknown> ? K : never;
 }[KeyPaths]`,
   });
   sourceFile.addClass({
@@ -125,195 +111,250 @@ async function generate() {
     ctors: [
       {
         parameters: [
-          { name: "basePath", type: "string", scope: tsMorph.Scope.Private },
+          { name: "baseUrl", type: "string", scope: tsMorph.Scope.Private },
           {
-            name: "option",
+            name: "defaultOptions",
             type: "RequestInit",
-            hasQuestionToken: true,
+            initializer: "{}",
+            scope: tsMorph.Scope.Private,
+          },
+          {
+            name: "defaultTimeoutMs",
+            type: "number",
+            initializer: "30000",
             scope: tsMorph.Scope.Private,
           },
         ],
+        statements: `this.baseUrl = baseUrl.replace(/\\/+$/, "");`,
       },
     ],
     methods: [
       {
-        name: "fetcher",
-        scope: tsMorph.Scope.Public,
-        isAsync: true,
-        parameters: [
-          { name: "input", type: "RequestInfo" },
-          { name: "init", type: "RequestInit", hasQuestionToken: true },
-        ],
-        statements: `const headers = {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    };
-
-    const response = await fetch(input, { ...init, headers });
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(
-        \`API request failed: \${response.status} \${response.statusText} - \${errorBody}\`,
-      );
-    }
-    return response.json();`,
-      },
-      {
-        name: "request",
-        typeParameters: ["M extends RestMethod", "P extends TypePaths<M>"],
-        parameters: [
-          { name: "method", type: "M" },
-          { name: "path", type: "P" },
-          {
-            name: "init",
-            type: "ApiPayload<P, M>",
-            initializer: "{} as ApiPayload<P, M>",
-          },
-        ],
-        returnType: "Promise<APIResponse<P, M>>",
-        statements: `const url = new URL(this.basePath + String(path));
-
-    url.pathname = this.buildPathUrl(url.pathname, init.path);
-    this.appendQueryParams(url, init.query);
-
-    const requestInit: RequestInit = {
-      method: method.toUpperCase(),
-      ...this.option,
-      headers: {
-        ...(this.option?.headers ?? {}),
-        ...(init.headers ?? {}),
-      },
-      body: this.prepareBody(method, init.body),
-    };
-
-    return this.fetcher(url.toString(), requestInit) as Promise<
-      APIResponse<P, M>
-    >;`,
-      },
-      {
-        name: "get",
-        scope: tsMorph.Scope.Public,
-        typeParameters: ['T extends TypePaths<"get">'],
-        parameters: [
-          { name: "path", type: "T" },
-          {
-            name: "payload",
-            type: 'ApiPayload<T, "get">',
-            hasQuestionToken: true,
-          },
-        ],
-        returnType: 'Promise<APIResponse<T, "get">>',
-        statements: 'return this.request("get", path, payload);',
-      },
-      {
-        name: "post",
-        scope: tsMorph.Scope.Public,
-        typeParameters: ['T extends TypePaths<"post">'],
-        parameters: [
-          { name: "path", type: "T" },
-          {
-            name: "payload",
-            type: 'ApiPayload<T, "post">',
-            hasQuestionToken: true,
-          },
-        ],
-        returnType: 'Promise<APIResponse<T, "post">>',
-        statements: 'return this.request("post", path, payload);',
-      },
-      {
-        name: "put",
-        scope: tsMorph.Scope.Public,
-        typeParameters: ['T extends TypePaths<"put">'],
-        parameters: [
-          { name: "path", type: "T" },
-          {
-            name: "payload",
-            type: 'ApiPayload<T, "put">',
-            hasQuestionToken: true,
-          },
-        ],
-        returnType: 'Promise<APIResponse<T, "put">>',
-        statements: 'return this.request("put", path, payload);',
-      },
-      {
-        name: "delete",
-        scope: tsMorph.Scope.Public,
-        typeParameters: ['T extends TypePaths<"delete">'],
-        parameters: [
-          { name: "path", type: "T" },
-          {
-            name: "payload",
-            type: 'ApiPayload<T, "delete">',
-            hasQuestionToken: true,
-          },
-        ],
-        returnType: 'Promise<APIResponse<T, "delete">>',
-        statements: 'return this.request("delete", path, payload);',
-      },
-      {
-        name: "patch",
-        scope: tsMorph.Scope.Public,
-        typeParameters: ['T extends TypePaths<"patch">'],
-        parameters: [
-          { name: "path", type: "T" },
-          {
-            name: "payload",
-            type: 'ApiPayload<T, "patch">',
-            hasQuestionToken: true,
-          },
-        ],
-        returnType: 'Promise<APIResponse<T, "patch">>',
-        statements: 'return this.request("patch", path, payload);',
-      },
-      {
-        name: "buildPathUrl",
+        name: "buildUrl",
         scope: tsMorph.Scope.Private,
+        typeParameters: ["P extends KeyPaths", "M extends RestMethod"],
         parameters: [
-          { name: "basePath", type: "string" },
-          { name: "pathParams", type: "unknown", hasQuestionToken: true },
+          { name: "pathTemplate", type: "P" },
+          { name: "pathParams", type: "ExtractPathParams<P, M>", hasQuestionToken: true },
         ],
-        returnType: "string",
-        statements: `let pathname = basePath;
-    if (pathParams != null) {
-      const params = pathParams as Record<string, unknown>;
-      pathname = decodeURIComponent(pathname).replace(/{(w+)}/g, (_, key) =>
-        encodeURIComponent(String(params[key])),
-      );
+        returnType: "URL",
+        statements: `let pathname = pathTemplate as string;
+
+    if (pathParams) {
+      pathname = pathname.replace(/\\{([^}]+)\\}/g, (_, paramName) => {
+        const value = (pathParams as Record<string, unknown>)[paramName];
+        if (value === undefined || value === null) {
+          throw new Error(\`Missing required path parameter: \${paramName}\`);
+        }
+        return encodeURIComponent(String(value));
+      });
     }
-    return pathname;`,
-      },
-      {
-        name: "prepareBody",
-        scope: tsMorph.Scope.Private,
-        parameters: [
-          { name: "method", type: "RestMethod" },
-          { name: "body", type: "unknown", hasQuestionToken: true },
-        ],
-        returnType: "string | undefined",
-        statements: `if (body && ["post", "put", "patch"].includes(method)) {
-      return JSON.stringify(body);
-    }
-    return undefined;`,
+
+    return new URL(this.baseUrl + pathname);`,
       },
       {
         name: "appendQueryParams",
         scope: tsMorph.Scope.Private,
         parameters: [
           { name: "url", type: "URL" },
-          { name: "queryParams", type: "unknown", hasQuestionToken: true },
+          { name: "query", type: "Record<string, unknown>", hasQuestionToken: true },
         ],
         returnType: "void",
-        statements: `if (queryParams != null) {
-      const params = queryParams as Record<string, unknown>;
-      for (const [key, value] of Object.entries(params)) {
-        if (value !== undefined && value !== null) {
-          url.searchParams.append(key, String(value));
-        }
+        statements: `if (!query) return;
+
+    for (const [key, value] of Object.entries(query)) {
+      if (value === undefined || value === null) continue;
+
+      if (Array.isArray(value)) {
+        value.forEach((v) => {
+          if (v !== undefined && v !== null) {
+            url.searchParams.append(key, String(v));
+          }
+        });
+      } else {
+        url.searchParams.append(key, String(value));
       }
     }`,
       },
+      {
+        name: "prepareBody",
+        scope: tsMorph.Scope.Private,
+        typeParameters: ["M extends RestMethod"],
+        parameters: [
+          { name: "method", type: "M" },
+          { name: "body", type: "unknown", hasQuestionToken: true },
+        ],
+        returnType: "BodyInit | null",
+        statements: `if (!body || !["post", "put", "patch"].includes(method)) return null;
+    return JSON.stringify(body);`,
+      },
+      {
+        name: "fetchWithTimeout",
+        scope: tsMorph.Scope.Private,
+        isAsync: true,
+        parameters: [
+          { name: "input", type: "RequestInfo" },
+          { name: "init", type: "RequestInit" },
+          { name: "timeoutMs", type: "number" },
+        ],
+        returnType: "Promise<Response>",
+        statements: `const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(input, {
+        ...init,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      return response;
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new Error(\`Request timed out after \${timeoutMs}ms\`);
+      }
+      throw err;
+    }`,
+      },
+      {
+        name: "createError",
+        scope: tsMorph.Scope.Private,
+        parameters: [
+          { name: "response", type: "Response" },
+          { name: "body", type: "string | null" },
+        ],
+        statements: `return Object.assign(new Error(), {
+      name: "ApiError",
+      message: \`API request failed: \${response.status} \${response.statusText}\`,
+      status: response.status,
+      statusText: response.statusText,
+      body: body ? JSON.parse(body) : null,
+    });`,
+      },
+      {
+        name: "request",
+        isAsync: true,
+        typeParameters: ["M extends RestMethod", "P extends PathsForMethod<M>"],
+        parameters: [
+          { name: "method", type: "M" },
+          { name: "path", type: "P" },
+          {
+            name: "payload",
+            type: "ApiPayload<P, M>",
+            initializer: "{} as ApiPayload<P, M>",
+          },
+          {
+            name: "options",
+            type: "RequestInit",
+            initializer: "{}",
+          },
+        ],
+        returnType: "Promise<APIResponse<P, M>>",
+        statements: `const url = this.buildUrl(path, payload.path);
+    this.appendQueryParams(url, payload.query ?? {});
+
+    const headers = {
+      "Content-Type": "application/json",
+      ...this.defaultOptions.headers,
+      ...payload.headers,
+      ...options.headers,
+    };
+
+    const requestInit: RequestInit = {
+      method: method.toUpperCase(),
+      ...this.defaultOptions,
+      ...options,
+      headers,
+      body: this.prepareBody(method, payload.body),
+    };
+
+    const response = await this.fetchWithTimeout(
+      url.toString(),
+      requestInit,
+      this.defaultTimeoutMs,
+    );
+
+    let responseBody: unknown;
+
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      responseBody = await response.json();
+    } else {
+      responseBody = await response.text();
+    }
+
+    if (!response.ok) {
+      throw this.createError(
+        response,
+        typeof responseBody === "string" ? responseBody : null,
+      );
+    }
+
+    return responseBody as APIResponse<P, M>;`,
+      },
+      {
+        name: "get",
+        scope: tsMorph.Scope.Public,
+        typeParameters: ['P extends PathsForMethod<"get">'],
+        parameters: [
+          { name: "path", type: "P" },
+          { name: "payload", type: 'ApiPayload<P, "get">', hasQuestionToken: true },
+          { name: "options", type: "RequestInit", hasQuestionToken: true },
+        ],
+        returnType: 'Promise<APIResponse<P, "get">>',
+        statements: 'return this.request("get", path, payload, options);',
+      },
+      {
+        name: "post",
+        scope: tsMorph.Scope.Public,
+        typeParameters: ['P extends PathsForMethod<"post">'],
+        parameters: [
+          { name: "path", type: "P" },
+          { name: "payload", type: 'ApiPayload<P, "post">', hasQuestionToken: true },
+          { name: "options", type: "RequestInit", hasQuestionToken: true },
+        ],
+        returnType: 'Promise<APIResponse<P, "post">>',
+        statements: 'return this.request("post", path, payload, options);',
+      },
+      {
+        name: "put",
+        scope: tsMorph.Scope.Public,
+        typeParameters: ['P extends PathsForMethod<"put">'],
+        parameters: [
+          { name: "path", type: "P" },
+          { name: "payload", type: 'ApiPayload<P, "put">', hasQuestionToken: true },
+          { name: "options", type: "RequestInit", hasQuestionToken: true },
+        ],
+        returnType: 'Promise<APIResponse<P, "put">>',
+        statements: 'return this.request("put", path, payload, options);',
+      },
+      {
+        name: "patch",
+        scope: tsMorph.Scope.Public,
+        typeParameters: ['P extends PathsForMethod<"patch">'],
+        parameters: [
+          { name: "path", type: "P" },
+          { name: "payload", type: 'ApiPayload<P, "patch">', hasQuestionToken: true },
+          { name: "options", type: "RequestInit", hasQuestionToken: true },
+        ],
+        returnType: 'Promise<APIResponse<P, "patch">>',
+        statements: 'return this.request("patch", path, payload, options);',
+      },
+      {
+        name: "delete",
+        scope: tsMorph.Scope.Public,
+        typeParameters: ['P extends PathsForMethod<"delete">'],
+        parameters: [
+          { name: "path", type: "P" },
+          { name: "payload", type: 'ApiPayload<P, "delete">', hasQuestionToken: true },
+          { name: "options", type: "RequestInit", hasQuestionToken: true },
+        ],
+        returnType: 'Promise<APIResponse<P, "delete">>',
+        statements: 'return this.request("delete", path, payload, options);',
+      },
     ],
   });
+
   await sourceFile.formatText();
   await project.save();
   spinner.stopAndPersist({

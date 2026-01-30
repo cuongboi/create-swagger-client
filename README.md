@@ -1,4 +1,4 @@
-# create-swagger-client
+# Create Swagger Client
 
 A TypeScript tool that generates a fully type-safe REST API client from OpenAPI/Swagger specifications. Built with `openapi-typescript` and `ts-morph`, it creates a strongly-typed client class with autocomplete and compile-time type checking for all API endpoints.
 
@@ -10,6 +10,7 @@ A TypeScript tool that generates a fully type-safe REST API client from OpenAPI/
 - 📝 **OpenAPI Spec Support**: Works with OpenAPI 3.x specifications (JSON or YAML)
 - 🌐 **URL or File Input**: Generate from remote URLs or local files
 - 🎯 **Type Inference**: Automatic extraction of path params, query params, headers, and request/response types
+- ⏱️ **Built-in Timeout**: Default 30s timeout per request (configurable)
 
 ## Installation
 
@@ -38,7 +39,7 @@ npx create-swagger-client https://api.example.com/openapi.json my-api-client.ts
 
 **Arguments:**
 - `source` (required): URL or file path to your OpenAPI/Swagger specification
-- `output` (optional): Output file name (default: `client-api.ts`)
+- `output` (optional): Output file name (default: `swagger-client.ts`)
 
 This will generate a file with:
 - All TypeScript types from your OpenAPI spec
@@ -50,7 +51,7 @@ This will generate a file with:
 After generation, import and use the client:
 
 ```typescript
-import { RestApiClient } from './client-api';
+import { RestApiClient } from './swagger-client';
 
 // Initialize the client
 const api = new RestApiClient('https://api.example.com', {
@@ -129,15 +130,21 @@ const result = await api.post('/projects/{projectId}/tasks', {
 
 #### Custom Fetch Options
 
+Each method accepts an optional `RequestInit` as the third argument:
+
 ```typescript
-const api = new RestApiClient('https://api.example.com', {
-  headers: {
-    'Authorization': 'Bearer TOKEN'
-  },
-  mode: 'cors',
+const users = await api.get('/users', { query: { page: 1 } }, {
   credentials: 'include',
-  // Any other RequestInit options
+  mode: 'cors'
 });
+```
+
+#### Timeout
+
+The client uses a default timeout of 30 seconds. You can override it in the constructor:
+
+```typescript
+const api = new RestApiClient('https://api.example.com', {}, 10_000);
 ```
 
 ## Generated Types
@@ -146,6 +153,7 @@ The generator creates several useful type utilities:
 
 - `RestMethod`: Union of HTTP methods (`"get" | "post" | "put" | "delete" | "patch"`)
 - `KeyPaths`: All available API paths
+- `PathsForMethod<M>`: Paths that support method `M`
 - `ExtractPathParams<Path, Method>`: Extract path parameters for an endpoint
 - `ExtractQueryParams<Path, Method>`: Extract query parameters for an endpoint
 - `ExtractHeaderParams<Path, Method>`: Extract header parameters for an endpoint
@@ -161,7 +169,7 @@ import {
   RestApiClient, 
   ExtractBody, 
   APIResponse 
-} from './client-api';
+} from './swagger-client';
 
 // Use types in your code
 type CreateUserBody = ExtractBody<'/users', 'post'>;
@@ -174,7 +182,7 @@ const createUser = (data: CreateUserBody): Promise<UserResponse> => {
 
 ## Error Handling
 
-The client throws errors for failed requests:
+The client throws an `ApiError` for failed requests. The error includes `status`, `statusText`, and a parsed JSON `body` when available:
 
 ```typescript
 try {
@@ -183,7 +191,7 @@ try {
   });
 } catch (error) {
   console.error('API request failed:', error.message);
-  // Error message includes status code, status text, and response body
+  // error.status, error.statusText, error.body
 }
 ```
 
