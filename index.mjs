@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { existsSync, readFileSync } from "fs";
 import openapiTS, { astToString } from "openapi-typescript";
 import ora from "ora";
 import { resolve } from "path";
@@ -24,6 +25,11 @@ async function generate() {
   if (isUrl(source) === false) {
     source = resolve(process.cwd(), source);
   }
+
+  if (existsSync(source)) {
+    source = readFileSync(source, "utf-8");
+  }
+
   const spinner = ora(`Generating API client from ${source}...`).start();
   const ast = await openapiTS(source);
   const contents = astToString(ast);

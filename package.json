@@ -1,6 +1,6 @@
 {
   "name": "create-swagger-client",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Generate fully type-safe REST API clients from OpenAPI/Swagger specifications",
   "main": "./index.mjs",
   "module": "./index.mjs",
